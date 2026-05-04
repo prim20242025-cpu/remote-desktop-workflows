@@ -29,8 +29,8 @@ jobs:
           Write-Host "🚀 Starting Cloudflare Tunnel..."
           $tunnelLog = "tunnel_output.txt"
           $process = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -RedirectStandardOutput $tunnelLog -NoNewWindow
-          
-          # Wait until the tunnel URL appears in the file (max 30 seconds)
+
+          $rdpUrl = $null
           $timeout = 30
           $elapsed = 0
           while ($elapsed -lt $timeout) {
@@ -38,30 +38,26 @@ jobs:
             $elapsed += 2
             if (Test-Path $tunnelLog) {
               $content = Get-Content $tunnelLog -Raw -ErrorAction SilentlyContinue
-              if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+              if ($content -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                $rdpUrl = $Matches[0]
                 break
               }
             }
           }
 
-          if (Test-Path $tunnelLog) {
-            $output = Get-Content $tunnelLog -Raw
-            Write-Host "Tunnel output:"
-            Write-Host $output
-
-            if ($output -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
-              $rdpUrl = $Matches[0]
-              Write-Host "============================================"
-              Write-Host "🌍 RDP TUNNEL URL: $rdpUrl"
-              Write-Host "--------------------------------------------"
-              Write-Host "   USE THIS IN REMOTE DESKTOP:"
-              Write-Host "   $($rdpUrl -replace 'https://', '')"
-              Write-Host "============================================"
-            } else {
-              Write-Host "⚠️  URL not found in tunnel output."
-            }
+          if ($rdpUrl) {
+            Write-Host "============================================"
+            Write-Host "🌍 RDP TUNNEL URL: $rdpUrl"
+            Write-Host "--------------------------------------------"
+            Write-Host "   USE THIS IN REMOTE DESKTOP:"
+            Write-Host "   $($rdpUrl -replace 'https://', '')"
+            Write-Host "============================================"
           } else {
-            Write-Host "⚠️  Tunnel log file not found."
+            if (Test-Path $tunnelLog) {
+              Write-Host "Tunnel log contents:"
+              Get-Content $tunnelLog | Write-Host
+            }
+            Write-Host "⚠️  Could not extract RDP URL automatically."
           }
 
           Write-Host "📋 CONNECTION DETAILS:"
