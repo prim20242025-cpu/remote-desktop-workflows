@@ -11,35 +11,44 @@ jobs:
       - name: Setup Cloudflared
         uses: AnimMouse/setup-cloudflared@v2
 
-      - name: Enable and Configure Windows RDP
+      - name: Force-Enable RDP and Verify Listen
         shell: pwsh
         run: |
-          # فعال‌سازی RDP در رجیستری
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          # باز کردن فایروال
+          # ۱. فعال‌سازی RDP از چند مسیر
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          # رفع مشکل NLA با غیرفعال کردن احراز هویت اجباری (اختیاری)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
-          # تنظیم SecurityLayer روی RDP (سازگاری بهتر)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0
-          # اطمینان از روشن بودن سرویس
-          Start-Service TermService -Verbose
-          Write-Host "✅ RDP configured properly"
+
+          # ۲. ریستارت کامل سرویس ترمینال
+          Restart-Service TermService -Force -Verbose
+          Start-Sleep -Seconds 10
+
+          # ۳. چک می‌کنیم پورت ۳۳۸۹ واقعا گوش می‌ده یا نه
+          $portCheck = netstat -an | Select-String ":3389" | Select-String "LISTENING"
+          if (-not $portCheck) {
+            Write-Host "⚠️ Port 3389 NOT LISTENING - manual intervention needed"
+          } else {
+            Write-Host "✅ Port 3389 is LISTENING"
+          }
+          Write-Host "✅ RDP Ready"
 
       - name: Set Administrator Password
         run: |
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd123!" -Force)
-          Write-Host "✅ Password Configured!"
+          Write-Host "✅ Password Configured"
 
-      - name: Start Cloudflare Tunnel and Show URL
+      - name: Start Cloudflare Tunnel and Extract URL
         shell: pwsh
         run: |
           Write-Host "🚀 Starting Cloudflare Tunnel..."
-          $tunnelLog = "tunnel_output.txt"
-          $process = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -RedirectStandardOutput $tunnelLog -NoNewWindow
+          $tunnelLog = "tunnel_stderr.txt"
+          # این بار stderr را می‌گیریم چون URL را آنجا می‌نویسد
+          $proc = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -NoNewWindow -RedirectStandardError $tunnelLog
 
+          # منتظر بمانیم تا URL پیدا شود
           $rdpHost = $null
-          $timeout = 30
+          $timeout = 40
           $elapsed = 0
           while ($elapsed -lt $timeout -and -not $rdpHost) {
             Start-Sleep -Seconds 2
@@ -47,7 +56,7 @@ jobs:
             if (Test-Path $tunnelLog) {
               Get-Content $tunnelLog | ForEach-Object {
                 if ($_ -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
-                  $rdpHost = $Matches[1]
+                  $rdpHost = $matches[1]
                 }
               }
             }
@@ -61,9 +70,9 @@ jobs:
             Write-Host "   $rdpHost"
             Write-Host "============================================"
           } else {
-            Write-Host "⚠️  Could not extract URL automatically."
+            Write-Host "⚠️ Could not extract URL automatically."
+            Write-Host "   Manual check from below:"
             if (Test-Path $tunnelLog) {
-              Write-Host "Tunnel log content for manual check:"
               Get-Content $tunnelLog | Write-Host
             }
           }
@@ -71,11 +80,10 @@ jobs:
           Write-Host "📋 CONNECTION DETAILS:"
           Write-Host "   USERNAME: runneradmin"
           Write-Host "   PASSWORD: P@ssw0rd123!"
-          Write-Host "   OS: Windows Server 2025"
-          Write-Host "   CPU: 4 cores"
-          Write-Host "   RAM: 16GB"
+          Write-Host "   OS: Windows Server 2025 Datacenter"
+          Write-Host "   CPU: 4 cores | RAM: 16GB"
 
-      - name: Keep Session Alive
+      - name: Keep Alive
         run: |
           Write-Host "⏳ Session Active - Keeping alive..."
           while ($true) {
