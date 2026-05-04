@@ -11,12 +11,20 @@ jobs:
       - name: Setup Cloudflared
         uses: AnimMouse/setup-cloudflared@v2
 
-      - name: Enable Windows RDP
+      - name: Enable and Configure Windows RDP
+        shell: pwsh
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          # فعال‌سازی RDP در رجیستری
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          # باز کردن فایروال
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Write-Host "✅ RDP Enabled Successfully!"
+          # رفع مشکل NLA با غیرفعال کردن احراز هویت اجباری (اختیاری)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+          # تنظیم SecurityLayer روی RDP (سازگاری بهتر)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0
+          # اطمینان از روشن بودن سرویس
+          Start-Service TermService -Verbose
+          Write-Host "✅ RDP configured properly"
 
       - name: Set Administrator Password
         run: |
@@ -30,34 +38,34 @@ jobs:
           $tunnelLog = "tunnel_output.txt"
           $process = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -RedirectStandardOutput $tunnelLog -NoNewWindow
 
-          $rdpUrl = $null
+          $rdpHost = $null
           $timeout = 30
           $elapsed = 0
-          while ($elapsed -lt $timeout) {
+          while ($elapsed -lt $timeout -and -not $rdpHost) {
             Start-Sleep -Seconds 2
             $elapsed += 2
             if (Test-Path $tunnelLog) {
-              $content = Get-Content $tunnelLog -Raw -ErrorAction SilentlyContinue
-              if ($content -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
-                $rdpUrl = $Matches[0]
-                break
+              Get-Content $tunnelLog | ForEach-Object {
+                if ($_ -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                  $rdpHost = $Matches[1]
+                }
               }
             }
           }
 
-          if ($rdpUrl) {
+          if ($rdpHost) {
             Write-Host "============================================"
-            Write-Host "🌍 RDP TUNNEL URL: $rdpUrl"
+            Write-Host "🌍 RDP TUNNEL URL: https://$rdpHost"
             Write-Host "--------------------------------------------"
             Write-Host "   USE THIS IN REMOTE DESKTOP:"
-            Write-Host "   $($rdpUrl -replace 'https://', '')"
+            Write-Host "   $rdpHost"
             Write-Host "============================================"
           } else {
+            Write-Host "⚠️  Could not extract URL automatically."
             if (Test-Path $tunnelLog) {
-              Write-Host "Tunnel log contents:"
+              Write-Host "Tunnel log content for manual check:"
               Get-Content $tunnelLog | Write-Host
             }
-            Write-Host "⚠️  Could not extract RDP URL automatically."
           }
 
           Write-Host "📋 CONNECTION DETAILS:"
