@@ -11,27 +11,32 @@ jobs:
       - name: Setup Cloudflared
         uses: AnimMouse/setup-cloudflared@v2
 
-      - name: Force-Enable RDP and Verify Listen
+      - name: Force RDP to Listen
         shell: pwsh
         run: |
-          # ۱. فعال‌سازی RDP از چند مسیر
+          # فعال‌سازی و تنظیمات امنیتی
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          # ۲. ریستارت کامل سرویس ترمینال
-          Restart-Service TermService -Force -Verbose
+          Restart-Service TermService -Force
           Start-Sleep -Seconds 10
 
-          # ۳. چک می‌کنیم پورت ۳۳۸۹ واقعا گوش می‌ده یا نه
-          $portCheck = netstat -an | Select-String ":3389" | Select-String "LISTENING"
-          if (-not $portCheck) {
-            Write-Host "⚠️ Port 3389 NOT LISTENING - manual intervention needed"
-          } else {
-            Write-Host "✅ Port 3389 is LISTENING"
+          # تست گوش دادن پورت
+          $tcp = netstat -an | Select-String ':3389' | Select-String 'LISTENING'
+          if (-not $tcp) {
+            Write-Host "⚠️ RDP still not listening, enabling via CIM..."
+            Invoke-CimMethod -ClassName Win32_TerminalServiceSetting -Namespace root/cimv2/terminalservices -MethodName SetAllowTSConnections -Arguments @{ AllowTSConnections = 1; fDenyTSConnections = $false }
+            Restart-Service TermService -Force
+            Start-Sleep -Seconds 10
           }
-          Write-Host "✅ RDP Ready"
+          $tcp = netstat -an | Select-String ':3389' | Select-String 'LISTENING'
+          if ($tcp) {
+            Write-Host "✅ RDP is LISTENING on 3389"
+          } else {
+            Write-Host "❌ CRITICAL: RDP still not listening!"
+          }
 
       - name: Set Administrator Password
         run: |
@@ -43,10 +48,8 @@ jobs:
         run: |
           Write-Host "🚀 Starting Cloudflare Tunnel..."
           $tunnelLog = "tunnel_stderr.txt"
-          # این بار stderr را می‌گیریم چون URL را آنجا می‌نویسد
           $proc = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -NoNewWindow -RedirectStandardError $tunnelLog
 
-          # منتظر بمانیم تا URL پیدا شود
           $rdpHost = $null
           $timeout = 40
           $elapsed = 0
@@ -63,30 +66,18 @@ jobs:
           }
 
           if ($rdpHost) {
-            Write-Host "============================================"
-            Write-Host "🌍 RDP TUNNEL URL: https://$rdpHost"
-            Write-Host "--------------------------------------------"
-            Write-Host "   USE THIS IN REMOTE DESKTOP:"
-            Write-Host "   $rdpHost"
-            Write-Host "============================================"
+            Write-Host "🌍 RDP TUNNEL: https://$rdpHost"
+            Write-Host "👉 $rdpHost"
           } else {
-            Write-Host "⚠️ Could not extract URL automatically."
-            Write-Host "   Manual check from below:"
-            if (Test-Path $tunnelLog) {
-              Get-Content $tunnelLog | Write-Host
-            }
+            Write-Host "⚠️ Manual check:"
+            Get-Content $tunnelLog -ErrorAction SilentlyContinue | Write-Host
           }
 
-          Write-Host "📋 CONNECTION DETAILS:"
-          Write-Host "   USERNAME: runneradmin"
-          Write-Host "   PASSWORD: P@ssw0rd123!"
-          Write-Host "   OS: Windows Server 2025 Datacenter"
-          Write-Host "   CPU: 4 cores | RAM: 16GB"
+          Write-Host "USER: runneradmin | PASS: P@ssw0rd123! | OS: Windows Server 2025"
 
       - name: Keep Alive
         run: |
-          Write-Host "⏳ Session Active - Keeping alive..."
           while ($true) {
             Start-Sleep -Seconds 60
-            Write-Host "✓ Active - $(Get-Date -Format 'HH:mm:ss')"
+            Write-Host "✓ $(Get-Date -Format 'HH:mm:ss')"
           }
