@@ -23,24 +23,41 @@ jobs:
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd123!" -Force)
           Write-Host "✅ Password Configured!"
 
-      - name: Start Cloudflare Tunnel
+      - name: Start Cloudflare Tunnel and Show URL
+        shell: pwsh
         run: |
-          Write-Host "============================================"
-          Write-Host "🚀 WINDOWS RDP - CLOUDFLARE TUNNEL"
-          Write-Host "============================================"
-          Write-Host ""
-          Start-Process PowerShell -ArgumentList '-NoExit -Command "cloudflared tunnel --url tcp://localhost:3389"'
-          Start-Sleep -Seconds 15
-          Write-Host ""
-          Write-Host "✅ TUNNEL STARTED! Check separate PowerShell window for URL"
-          Write-Host ""
+          Write-Host "🚀 Starting Cloudflare Tunnel..."
+          $tunnelLog = "tunnel_output.txt"
+          $process = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -RedirectStandardOutput $tunnelLog -NoNewWindow
+          Start-Sleep -Seconds 20
+
+          if (Test-Path $tunnelLog) {
+            $output = Get-Content $tunnelLog -Raw
+            Write-Host "Tunnel output:"
+            Write-Host $output
+
+            $url = [regex]::Match($output, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
+            if ($url.Success) {
+              $rdpUrl = $url.Value
+              Write-Host "============================================"
+              Write-Host "🌍 RDP TUNNEL URL: $rdpUrl"
+              Write-Host "--------------------------------------------"
+              Write-Host "   USE THIS IN REMOTE DESKTOP:"
+              Write-Host "   $($rdpUrl -replace 'https://', '')"
+              Write-Host "============================================"
+            } else {
+              Write-Host "⚠️  Could not extract URL. Check tunnel_output.txt"
+            }
+          } else {
+            Write-Host "⚠️  Tunnel log file not found."
+          }
+
           Write-Host "📋 CONNECTION DETAILS:"
           Write-Host "   USERNAME: runneradmin"
           Write-Host "   PASSWORD: P@ssw0rd123!"
-          Write-Host "   OS: Windows Server 2022"
+          Write-Host "   OS: Windows Server 2025"
           Write-Host "   CPU: 4 cores"
           Write-Host "   RAM: 16GB"
-          Write-Host "============================================"
 
       - name: Keep Session Alive
         run: |
