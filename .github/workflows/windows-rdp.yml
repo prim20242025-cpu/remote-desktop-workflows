@@ -29,16 +29,28 @@ jobs:
           Write-Host "🚀 Starting Cloudflare Tunnel..."
           $tunnelLog = "tunnel_output.txt"
           $process = Start-Process cloudflared -ArgumentList "tunnel --url tcp://localhost:3389" -PassThru -RedirectStandardOutput $tunnelLog -NoNewWindow
-          Start-Sleep -Seconds 20
+          
+          # Wait until the tunnel URL appears in the file (max 30 seconds)
+          $timeout = 30
+          $elapsed = 0
+          while ($elapsed -lt $timeout) {
+            Start-Sleep -Seconds 2
+            $elapsed += 2
+            if (Test-Path $tunnelLog) {
+              $content = Get-Content $tunnelLog -Raw -ErrorAction SilentlyContinue
+              if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+                break
+              }
+            }
+          }
 
           if (Test-Path $tunnelLog) {
             $output = Get-Content $tunnelLog -Raw
             Write-Host "Tunnel output:"
             Write-Host $output
 
-            $url = [regex]::Match($output, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
-            if ($url.Success) {
-              $rdpUrl = $url.Value
+            if ($output -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+              $rdpUrl = $Matches[0]
               Write-Host "============================================"
               Write-Host "🌍 RDP TUNNEL URL: $rdpUrl"
               Write-Host "--------------------------------------------"
@@ -46,7 +58,7 @@ jobs:
               Write-Host "   $($rdpUrl -replace 'https://', '')"
               Write-Host "============================================"
             } else {
-              Write-Host "⚠️  Could not extract URL. Check tunnel_output.txt"
+              Write-Host "⚠️  URL not found in tunnel output."
             }
           } else {
             Write-Host "⚠️  Tunnel log file not found."
